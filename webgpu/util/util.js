@@ -36,7 +36,7 @@ export function termColor(s, c) {
     c = colormap[c]
   
   if (c > 107) {
-    s2 = '\u001b[38;5;' + str(c) + "m"
+    let s2 = '\u001b[38;5;' + c + "m"
     return s2 + s + '\u001b[0m'
   }
 

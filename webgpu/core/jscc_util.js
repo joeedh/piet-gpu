@@ -1,17 +1,73 @@
 import '../util/jscc.js';
+import * as util from '../util/util.js';
 
-const debug = 0;
+const debug = 1;
 
 export class Parser {
-  constructor(lexer, pdata) {
+  constructor(lexer, pdata, hash) {
     this.pdata = pdata;
     this.lexer = lexer;
+    this.hash = hash;
+  }
+
+  toJSON() {
+    let pdata = this.pdata;
+
+    return {
+      pop_tab          : pdata.pop_tab,
+      act_tab          : pdata.act_tab,
+      goto_tab         : pdata.goto_tab,
+      labelmap         : pdata.labelmap,
+      labels           : pdata.labels,
+      error_symbol     : pdata.error_symbol,
+      eof_symbol       : pdata.eof_symbol,
+      whitespace_token : pdata.whitespace_token,
+      defact_tab       : pdata.defact_tab,
+      productions      : pdata.productions,
+      hash             : this.hash
+    };
+  }
+
+  loadJSON(obj, actions) {
+    let actions2 = {};
+
+    actions2[0] = function(p) {
+      p[0] = p[1];
+    }
+
+    for (let p of obj.productions) {
+      let code = p.code.trim();
+      if (code.startsWith("_")) {
+        code = code.slice(1, code.length);
+
+        actions2[p.id] = actions[code];
+      }
+    }
+
+    this.pdata = obj;
+    this.hash = obj.hash;
+    this.pdata.actions = actions2;
   }
 
   parse(buf, onerror) {
     this.lexer.input(buf);
 
     this.onerror = onerror;
+
+    let linemap = new Array(buf.length);
+    let colmap = new Array(buf.length);
+
+    let linei = 0, coli = 0;
+
+    for (let i=0; i<buf.length; i++) {
+      linemap[i] = linei;
+      colmap[i] = coli++;
+
+      if (buf[i] === "\n") {
+        linei++;
+        coli = 0;
+      }
+    }
 
     let lexer = this.lexer;
     let pdata = this.pdata;
@@ -87,9 +143,13 @@ export class Parser {
         this2.onerror(p);
       }
 
-      let line = -1;
+      let line = -1, col = -1;
       if (p) {
         line = p.line;
+        line = linemap[p.offset];
+        col = colmap[p.offset];
+
+        console.log(p);
       }
 
       console.log(p)
@@ -109,8 +169,20 @@ export class Parser {
       }
 
       console.log(s);
-      console.warn("Parse error on line " + line);
-      throw new Error("Parse error on line " + line);
+      let message = "";
+
+      message += `${line}:${col}: Syntax Error\n`
+      let l = lines[line];
+      //l = l.slice(0, col) + util.termColor(l[col], "red") + l.slice(col+1, l.length);
+      message += "  " + l + "\n";
+
+      for (let i=0; i<col+2; i++) {
+        message += " ";
+      }
+      message += "^\n";
+
+      console.warn(message, p);
+      throw new Error(message);
     }
 
     console.log("%cPARSING!", "color : orange;");
@@ -229,8 +301,12 @@ export class Parser {
   }
 }
 
-export function getParser(lexer, parsedef, tokenlist, prec) {
-  let grammar = "/~ We use our own lexical scannar ~/";
+export function getParser(lexer, parsedef, tokenlist, prec, parserName) {
+  if (parserName === undefined) {
+    throw new Error("parserName cannot be undefined");
+  }
+
+  let grammar = "/~ We use our own lexical scannar ~/\n";
 
   let visit = {};
 
@@ -295,7 +371,50 @@ export function getParser(lexer, parsedef, tokenlist, prec) {
     grammar += "\n;\n";
   }
 
+  let actions = {};
+  for (let p of parsedef) {
+    actions[""+p.id] = p.func;
+    p.func.grammar = p.grammar;
+  }
+
+  //if (localStorage
+  let hash = util.strhash(grammar);
+  let storageKey = "parseTable_" + parserName;
+  let parser;
+  if (storageKey in localStorage) {
+    let buf = localStorage[storageKey];
+
+    try {
+      let json = JSON.parse(buf);
+      console.log(json);
+      parser = new Parser(lexer);
+      parser.loadJSON(json, actions);
+    } catch (error) {
+      util.print_stack(error);
+      console.warn("failed to load parse tables from localStorage; rebuilding. . .");
+      parser = undefined;
+    }
+  }
+
+  window.grammar = grammar;
+
+  if (parser) {
+    console.log("Old hash:", parser.hash, "new hash:", hash);
+
+    if (parser.hash === hash) {
+      return parser;
+    }
+  }
+
+  /*
+  return {
+    parse() {
+
+    }
+  }//*/
+
   console.log(grammar);
+  console.log(`Building parse tables (will be cached in localStorage[${storageKey}]. . .`);
 
   let parse_grammar = jscc.require("lib/jscc/parse");
   let integrity = jscc.require("lib/jscc/integrity");
@@ -397,12 +516,6 @@ export function getParser(lexer, parsedef, tokenlist, prec) {
     }
     pdata.labelmap = labelmap;
 
-    let actions = {};
-    for (let p of parsedef) {
-      actions[""+p.id] = p.func;
-      p.func.grammar = p.grammar;
-    }
-
     pdata.productions = global.productions;
 
     let actions2 = {};
@@ -429,7 +542,9 @@ export function getParser(lexer, parsedef, tokenlist, prec) {
   window.grammar = ret;
   console.log(ret);
 
-  let parser = new Parser(lexer, ret);
+  parser = new Parser(lexer, ret, hash);
+
+  localStorage[storageKey] = JSON.stringify(parser);
 
   return parser;
 }

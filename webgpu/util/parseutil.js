@@ -48,6 +48,8 @@ export class lexer {
     this.errfunc = errfunc;
     this.tokints = {}
 
+    this.prev = undefined; //previous token
+
     for (var i=0; i<tokdef.length; i++) {
       this.tokints[tokdef[i].name] = i;
     }
@@ -97,6 +99,7 @@ export class lexer {
       this.pop_state();
     }
 
+    this.prev = undefined;
     this.lexdata = str;
     this.lexpos = 0;
     this.lineno = 0;
@@ -126,6 +129,9 @@ export class lexer {
     return tok;
   }
 
+  peeknext() {
+    return this.peek_i(0);
+  }
 
   peek_i(i) {
     while (this.peeked_tokens.length <= i) {
@@ -146,6 +152,7 @@ export class lexer {
       var tok = this.peeked_tokens[0];
       this.peeked_tokens.shift();
 
+      this.prev = tok;
       return tok;
     }
 
@@ -199,6 +206,10 @@ export class lexer {
       if (tok === undefined) {
         return this.next();
       }
+    }
+
+    if (!ignore_peek) {
+      this.prev = tok;
     }
 
     return tok;

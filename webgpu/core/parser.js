@@ -82,7 +82,21 @@ let tokendef = [
   tk("MEDIUM_PRECISION", /mediump/),
   tk("LOW_PRECISION", /lowp/),
   tk("ID", /[a-zA-Z$_]+[a-zA-Z0-9$_]*/, (t) => {
+    t.isKeyword = false;
+
+    let n = t.lexer.peeknext();
+    if (n && (n.type === "ID" || n.isKeyword || n.type === "LSBRACKET")) {
+      t.type = "TYPE_NAME";
+      return t;
+    }
+
+    if (t.lexer.prev && t.lexer.prev.type === "DOT") {
+      t.type = "FIELD_SELECTION";
+      return t;
+    }
+
     if (keywords.has(t.value.toUpperCase())) {
+      t.isKeyword = true;
       t.type = t.value.toUpperCase();
       t.value = t.value.toLowerCase();
     }
@@ -131,7 +145,7 @@ let tokendef = [
   tk("NOT", /\!/),
   tk("MINUS", /\-/),
   tk("TIMES", /\*/),
-  tk("DIVIDE", /\//),
+  tk("DIV", /\//),
   tk("EXP", /\*\*/),
   tk("LAND", /\&\&/),
   tk("BITAND", /\&/),
@@ -184,9 +198,10 @@ let binops = new Set([
 ]);
 
 let precedence = [
-  ["left", "DOT"],
+  ["nonassoc", "LPAREN", "RPAREN"],
+  ["left", "LSBRACKET", "RSBRACKET", "DOT", "INC", "DEC"],
   ["right", "UNARY"],
-  ["left", "TIMES", "DIV"],
+  ["left", "TIMES", "DIV", "MOD"],
   ["left", "PLUS", "MINUS"],
   ["left", "LSHIFT", "RSHIFT"],
   ["left", "GEQUALS", "LEQUALS", "GTHAN", "LTHAN"],
@@ -197,10 +212,10 @@ let precedence = [
   ["left", "LAND"],
   ["left", "LXOR"],
   ["left", "LOR"],
-  ["left", "FIELD_SELECTION"],
-  ["left", "ASSIGN"],
+  ["right", "QUESTION", "COLON"],
+  ["right", "ASSIGN", "MUL_ASSIGN", "DIV_ASSIGN", "PLUS_ASSIGN", "MINUS_ASSIGN", "MOD_ASSIGN", "OR_ASSIGN",
+    "XOR_ASSIGN", "RIGHT_ASSIGN", "LEFT_ASSIGN", "AND_ASSIGN"]
 ]
-
 
 function indent(n, chr="  ") {
   let s = "";
@@ -408,7 +423,7 @@ let parsedef = [
     }
   },
   {
-    grammar : `field_selection : ID`,
+    grammar : `field_selection : FIELD_SELECTION`,
     func : (p) => {
       p[0] = new Node("ID");
       p[0].value = p[1];
@@ -418,7 +433,7 @@ let parsedef = [
     grammar : `postfix_expression: primary_expression
                                  | postfix_expression LSBRACKET integer_expression RSBRACKET
                                  | function_call
-                                 | postfix_expression DOT field_selection &FIELD_SELECTION
+                                 | postfix_expression DOT field_selection
                                  | postfix_expression INC
                                  | postfix_expression DEC
                `,
@@ -433,6 +448,7 @@ let parsedef = [
         let n = new Node("ID");
         n.value = p[3];
 
+        p[0].add(p[1]);
         p[0].add(n);
       } else if (p.length === 3) {
         let type = p[2] === "++" ? "PostInc" : "PostDec";
@@ -596,7 +612,7 @@ let parsedef = [
   },
   {
     grammar : `logical_xor_expression: logical_and_expression
-                                     | logical_and_expression LXOR logical_and_expression
+                                     | logical_xor_expression LXOR logical_and_expression
                                `,
     func : BinOpHandler
   },
@@ -725,7 +741,7 @@ let parsedef = [
     }
   },
   {
-    grammar : `type_name : ID`,
+    grammar : `type_name : TYPE_NAME`,
     func : (p) => {
       p[0] = new Node("TypeName");
       p[0].value = p[1];
@@ -1104,8 +1120,8 @@ let parsedef = [
   {
     grammar : `single_declaration : fully_specified_type
                                   | fully_specified_type ID
-                                  | fully_specified_type ID array_specifier
                                   | fully_specified_type ID array_specifier ASSIGN initializer
+                                  | fully_specified_type ID array_specifier
                                   | fully_specified_type ID ASSIGN initializer 
 
  `,
@@ -1599,7 +1615,7 @@ let parsedef = [
 
 
 
-let tokens = [];
+let tokens = ["FIELD_SELECTION", "TYPE_NAME"];
 for (let key of keywords) {
   tokens.push(key);
 }
@@ -1607,11 +1623,12 @@ for (let tk of tokendef) {
   tokens.push(tk.name);
 }
 
-export let parser = jscc_util.getParser(lex, parsedef, tokens, precedence);
+export let parser = jscc_util.getParser(lex, parsedef, tokens, precedence, "glsl");
 
 
-parser.parse(`
-// It's possible we should lay this out with x and do our own math.
+parser.parse(`intersects[gl_LocalInvocationID.y] = 0;`);
+
+let bleh = (`// It's possible we should lay this out with x and do our own math.
 layout(local_size_x = 1, local_size_y = 32) in;
 
 layout(set = 0, binding = 0) readonly buffer SceneBuf {
