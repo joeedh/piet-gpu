@@ -1,5 +1,7 @@
 import '../util/jscc.js';
 
+const debug = 0;
+
 export class Parser {
   constructor(lexer, pdata) {
     this.pdata = pdata;
@@ -34,7 +36,9 @@ export class Parser {
       la: null,
       act: null,
       lex: function () {
-        console.log("next token");
+        if (debug) {
+          console.log("next token");
+        }
 
         let ret = lexer.next();
         if (ret === undefined) {
@@ -89,6 +93,22 @@ export class Parser {
       }
 
       console.log(p)
+      let lines = buf.split("\n");
+      let s = "";
+
+      for (let i=line-15; i<line+25; i++) {
+        if (i < 0) continue;
+        if (i >= lines.length) break;
+
+        let si = ""+i;
+        while (si.length < 3) {
+          si = " " + si;
+        }
+
+        s += si + ": " + lines[i] + "\n";
+      }
+
+      console.log(s);
       console.warn("Parse error on line " + line);
       throw new Error("Parse error on line " + line);
     }
@@ -100,7 +120,9 @@ export class Parser {
     PCB.lex();
     while (1) {//!this.lexer.at_end()) {
       PCB.act = get_act(sstack[0], PCB.la);
-      console.log(PCB.act, PCB.la);
+      if (debug) {
+        console.log(PCB.act, PCB.la);
+      }
 
       if (PCB.act === null && defact_tab[sstack[0]] >= 0)
         PCB.act = -defact_tab[sstack[0]];
@@ -161,24 +183,26 @@ export class Parser {
         act = -PCB.act;
         //vstack.unshift(vstack);
 
-        rval = "BLEH";
-        vstack.unshift(null);
-
-        let tail = vstack.pop();
-        let actfunc = actions[act];
-        if (!actfunc) {
-          vstack[0] = vstack[1];
-        } else {
-          actfunc(vstack);
+        let prod = pdata.productions[act].rhs;
+        let p = [null];
+        for (let i=0; i<prod.length; i++) {
+          p.push(vstack[prod.length-i-1]);
         }
 
-        console.log("action", act, vstack, actfunc);
+        if (debug) {
+          console.log("P", p);
+        }
+        //console.log("V", vstack);
 
-        vstack.push(tail);
-        rval = vstack[0];
-        vstack.shift();
+        let actfunc = actions[act];
+        if (!actfunc) {
+          p[0] = p[1];
+        } else {
+          actfunc(p);
+        }
 
-        console.log(vstack, rval);
+        rval = p[0];
+        //console.log("action", act, vstack, actfunc);
 
         //rval = ACTIONS(act, vstack, PCB);
 
@@ -197,10 +221,10 @@ export class Parser {
       }
     }
 
-    console.log(rval);
-
     let ret = rval;
     console.log("RET", ret);
+    window.noderet = ret;
+
     return ret;
   }
 }
@@ -252,12 +276,20 @@ export function getParser(lexer, parsedef, tokenlist, prec) {
 
   for (let p of parsedef) {
     let lines = p.grammar.split("\n");
+    let li = 0;
+
     for (let l of lines) {
+      if (li === 0) {
+        l = "               " + l;
+      }
+
       if (l.trim().length === 0) {
+        li++;
         continue;
       }
 
       grammar += l + ` [*_${p.id}*]\n`;
+      li++;
     }
 
     grammar += "\n;\n";
@@ -398,8 +430,6 @@ export function getParser(lexer, parsedef, tokenlist, prec) {
   console.log(ret);
 
   let parser = new Parser(lexer, ret);
-
-  parser.parse("[1]");
 
   return parser;
 }

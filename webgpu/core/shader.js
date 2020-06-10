@@ -223,7 +223,7 @@ export function loadShader(path) {
 
   //*/
 
-  buf = replaceComments(buf);
+  //buf = replaceComments(buf);
 
   //console.log(buf);
 }
