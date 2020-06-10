@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head>
+<style>
+  body {
+    margin  : 0px;
+    padding : 0px;
+  }
+</style>
+<script type="module">
+  import * as app from "./core/appstate.js";
+
+  window.init = function () {
+    console.log("Initializing");
+    app.init();
+  }
+</script>
+</head>
+<body onload="init()">
+</body>
+</html>

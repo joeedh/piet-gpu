@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "electron": "^10.0.0-beta.2",
+    "glsl-parser": "^2.0.1",
+    "glsl-tokenizer": "^2.1.5"
+  },
+  "main": "main.js"
+}
