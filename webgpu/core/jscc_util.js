@@ -206,11 +206,40 @@ export class Parser {
 }
 
 export function getParser(lexer, parsedef, tokenlist, prec) {
-  let grammar = "";
+  let grammar = "/~ We use our own lexical scannar ~/";
 
-  var i = 0;
+  let visit = {};
+
+  var _i = 0;
+
+  for (let list of prec) {
+    let prec = list[0];
+    if (prec === "left")
+      prec = "<";
+    else if (prec === "right")
+      prec = ">"
+    else
+      prec = ""
+
+    grammar += prec + " ";
+    for (let i=1; i<list.length; i++) {
+      if (i > 1) {
+        grammar += "  ";
+      }
+      grammar += ` '${_i++}' ${list[i]}\n`
+
+      visit[list[i]] = 1;
+    }
+    grammar += ";\n";
+
+  }
+
   for (let t of tokenlist) {
-    grammar += `'${i++}'  ${t} \n`
+    if (t in visit) {
+      continue;
+    }
+
+    grammar += `'${_i++}'  ${t} \n`
   }
   grammar += ";\n\n##\n\n";
 

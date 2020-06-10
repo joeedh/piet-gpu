@@ -121,10 +121,12 @@ let tokendef = [
   tk("DIVIDE", /\//),
   tk("EXP", /\*\*/),
   tk("LAND", /\&\&/),
-  tk("BAND", /\&/),
+  tk("BITAND", /\&/),
   tk("LOR", /\|\|/),
-  tk("BOR", /\|/),
-  tk("EQUALS", /=/),
+  tk("BITOR", /\|/),
+  tk("EQUALS", /==/),
+  tk("NEQUALS", /\!=/),
+  tk("ASSIGN", /=/),
   tk("LEQUALS", /\<\=/),
   tk("GEQUALS", /\>\=/),
   tk("LTHAN", /\</),
@@ -148,30 +150,16 @@ let binops = new Set([
   ">", "==", "=", "<=", ">="//, "(", ")"
 ]);
 
-let precedence;
-
-if (1) {
-  let table = [
-    ["left", "**"],
-    ["left", "*", "/"],
-    ["left", "+", "-"],
-    ["left", "&", "|", "^"],
-    ["left", "!=", "=="],
-    ["left", ">=", "<=", ">", "<"],
-    ["left", "&&", "||"],
-    ["left", "."],
-    ["left", "="],
-  ]
-
-  let pr = {};
-  for (let i = 0; i < table.length; i++) {
-    for (let c of table[i]) {
-      pr[c] = i;
-    }
-  }
-
-  precedence = pr;
-}
+let precedence = [
+  ["left", "TIMES", "DIV"],
+  ["left", "PLUS", "MINUS"],
+  ["left", "BITAND", "BITOR", "XOR"],
+  ["left", "NEQUALS", "EQUALS"],
+  ["left", "GEQUALS", "LEQUALS", "GTHAN", "LTHAN"],
+  ["left", "LAND", "LOR"],
+  ["left", "DOT"],
+  ["left", "ASSIGN"],
+]
 
 
 function indent(n, chr="  ") {
@@ -338,6 +326,6 @@ for (let tk of tokendef) {
   tokens.push(tk.name);
 }
 
-export let parser = jscc_util.getParser(lex, parsedef, tokens);
+export let parser = jscc_util.getParser(lex, parsedef, tokens, precedence);
 
 
