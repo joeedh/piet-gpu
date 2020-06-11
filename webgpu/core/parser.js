@@ -84,8 +84,7 @@ let tokendef = [
   tk("ID", /[a-zA-Z$_]+[a-zA-Z0-9$_]*/, (t) => {
     t.isKeyword = false;
 
-    let n = t.lexer.peeknext();
-    if (n && (n.type === "ID" || n.isKeyword || n.type === "LSBRACKET")) {
+    if (t.value in t.lexer.structs) {
       t.type = "TYPE_NAME";
       return t;
     }
@@ -186,11 +185,35 @@ tk("LEFT_ASSIGN", /\<\<\=/),
 
 ];
 
-let lex = new lexer(tokendef, (t) => {
-  console.log("Token error");
-  return true;
-});
+class GLSLLexer extends lexer {
+  constructor() {
+    super(tokendef, (t) => {
+      console.log("Token error");
+      return true;
+    });
 
+    this.scope = {};
+    this.structs = {};
+    this.scopestack = [];
+  }
+
+  pushScope() {
+    this.scopestack.push(this.scope);
+    this.scope = Object.assign({}, this.scope);
+  }
+
+  popScope() {
+    this.scope = this.scopestack.pop();
+  }
+
+  input(data) {
+    super.input(data);
+
+    this.scope = {};
+    this.structs = {};
+  }
+}
+let lex = new GLSLLexer();
 
 let binops = new Set([
   ".", "/", "*", "**", "^", "%", "&", "+", "-", "&&", "||", "&", "|", "<",
@@ -199,7 +222,7 @@ let binops = new Set([
 
 let precedence = [
   ["nonassoc", "LPAREN", "RPAREN"],
-  ["left", "LSBRACKET", "RSBRACKET", "DOT", "INC", "DEC"],
+  ["left", "LSBRACKET", "RSBRACKET", "DOT", "INC", "DEC", "FIELD_SELECTOR"],
   ["right", "UNARY"],
   ["left", "TIMES", "DIV", "MOD"],
   ["left", "PLUS", "MINUS"],
@@ -214,7 +237,8 @@ let precedence = [
   ["left", "LOR"],
   ["right", "QUESTION", "COLON"],
   ["right", "ASSIGN", "MUL_ASSIGN", "DIV_ASSIGN", "PLUS_ASSIGN", "MINUS_ASSIGN", "MOD_ASSIGN", "OR_ASSIGN",
-    "XOR_ASSIGN", "RIGHT_ASSIGN", "LEFT_ASSIGN", "AND_ASSIGN"]
+    "XOR_ASSIGN", "RIGHT_ASSIGN", "LEFT_ASSIGN", "AND_ASSIGN"],
+  ["left", "COMMA"]
 ]
 
 function indent(n, chr="  ") {
@@ -899,7 +923,7 @@ let parsedef = [
       } else {
         p[0].add(p[3]);
         p[0].ntype = p[2];
-        p[0].type.qualifier = p[1];
+        p[0].ntype.qualifier = p[1];
       }
     }
   },
@@ -941,44 +965,83 @@ let parsedef = [
         p[0].name = "(anonymous)";
         p[0].add(p[3]);
       }
+
+      p.lexer.structs[p[0].name] = p[0];
     }
   },
   {
-    grammar : `declaration: function_prototype SEMI
+    grammar : "function_prototype_pop_scope: function_prototype",
+    func : (p) => {
+      p[0] = p[1];
+      p.lexer.popScope();
+    }
+  },
+  {
+    grammar : `declaration: function_prototype_pop_scope SEMI
                           | init_declarator_list SEMI
                           | PRECISION precision_qualifier type_specifier SEMI
                           | type_qualifier ID LBRACE struct_declaration_list RBRACE SEMI
-                          | type_qualifier ID LBRACE struct_declaration_list RBRACE
-                          | ID SEMI
-                          | ID array_specifier SEMI
+                          | type_qualifier ID LBRACE struct_declaration_list RBRACE ID SEMI
+                          | type_qualifier ID LBRACE struct_declaration_list RBRACE ID array_specifier SEMI
                           | type_qualifier SEMI
                           | type_qualifier ID SEMI
                           | type_qualifier ID id_list SEMI
+
     `,
     func : (p) => {
-      if (p.length === 3 && typeof p[1] === "string") {
-        p[0] = new Node("ID");
-        p[0].value = p[1];
-      } else if (p.length === 3) {
+      if (p.length === 3) {
         p[0] = p[1];
-      } else if (p.length === 3) {
-        p[0] = p[1];
-      } else if (p.length === 5) {
-        p[0] = new Node("Precision");
-        p[0].add(p[2]);
-        p[0].add(p[3]);
-      } else if (p.length === 6 || p.length === 7) {
-        p[0] = p[4];
-        p[0].qualifier = p[1];
-      } else if (p.length === 4) {
-        if (typeof p[1] === "string") {
-          p[0] = new Node("ID");
-          p[0].value = p[1];
-          p[0].arraytype = p[2];
+      } else if (p.length === 5 && p[1] === "precision") {
+        let n = new Node("Precision");
+        n.add(p[2]);
+        n.add(p[3]);
+
+        p[0] = n;
+      } else if (p.length > 6) {
+        let n = new Node("StructDecl");
+        n.name = p[2];
+        p.lexer.structs[n.name] = n;
+
+        n.qualifier = p[1];
+
+        n.add(p[4]);
+        if (p.length > 7) {
+          let n2 = new Node("VarDecl");
+          n2.name = p[6];
+          n2.ntype = n;
+
+          p.lexer.scope[n2.name] = n2;
+
+          if (p.length > 8) {
+            n2.arraytype = p[7];
+          }
+          p[0] = n2;
         } else {
-          p[0] = new Node("VarDecl");
-          p[0].qualifier = p[1];
-          p[0].name = p[2];
+          p[0] = n;
+        }
+      } else if (n.length === 4) {
+        p[0] = new Node("VarDecl");
+        p[0].name = p[2];
+
+        p.lexer.scope[p[0].name] = p[0];
+      } else if (n.length === 5) {
+        let n = new Node("VarDecl");
+        n.name = p[2];
+        n.ntype = p[1];
+
+        p.lexer.scope[p[0].name] = n;
+
+        p[0] = new Node("StatementList");
+        p[0].add(n);
+
+        for (let c of p[3]) {
+          let n2 = new Node("VarDecl");
+
+          n2.ntype = n.ntype;
+          n2.name = c;
+          p.lexer.scope[n2.name] = n2;
+
+          p[0].add(n2);
         }
       } else {
         console.log(p);
@@ -1001,6 +1064,13 @@ let parsedef = [
   {
     grammar : `function_prototype: function_declarator RPAREN`,
     func : (p) => {
+      p.lexer.pushScope();
+
+      for (let c of p[1][0]) {
+        p.lexer.scope[c.name] = c;
+      }
+
+      window.fn = p[1];
       p[0] = p[1];
     }
   },
@@ -1383,7 +1453,7 @@ let parsedef = [
       if (p.length === 3) {
         p[0] = new Node("Expr");
       } else {
-        p[0].add(p[2]);
+        p[0] = p[2];
       }
     }
   },
@@ -1414,10 +1484,14 @@ let parsedef = [
     func : (p) => {
       if (p.length === 2) {
         p[0] = new Node("StatementList");
-        p[0].add(p[1]);
+        if (p[1]) {
+          p[0].add(p[1]);
+        }
       } else {
         p[0] = p[1];
-        p[0].add(p[2]);
+        if (p[2]) {
+          p[0].add(p[2]);
+        }
       }
     }
   },
@@ -1589,6 +1663,9 @@ let parsedef = [
     grammar : `function_definition: function_prototype compound_statement_no_new_scope`,
     func : (p) => {
       p[0] = p[1];
+
+      p.lexer.popScope();
+
       p[0].add(p[2]);
     }
   },
@@ -1615,20 +1692,24 @@ let parsedef = [
 
 
 
-let tokens = ["FIELD_SELECTION", "TYPE_NAME"];
+let tokens = new Set(["FIELD_SELECTION", "TYPE_NAME"]);
 for (let key of keywords) {
-  tokens.push(key);
+  tokens.add(key);
 }
 for (let tk of tokendef) {
-  tokens.push(tk.name);
+  tokens.add(tk.name);
 }
+
+let t = [];
+for (let token of tokens) {
+  t.push(token);
+}
+tokens = t;
 
 export let parser = jscc_util.getParser(lex, parsedef, tokens, precedence, "glsl");
 
-
-parser.parse(`intersects[gl_LocalInvocationID.y] = 0;`);
-
-let bleh = (`// It's possible we should lay this out with x and do our own math.
+/*
+parser.parse(`// It's possible we should lay this out with x and do our own math.
 layout(local_size_x = 1, local_size_y = 32) in;
 
 layout(set = 0, binding = 0) readonly buffer SceneBuf {
@@ -1785,3 +1866,5 @@ void main() {
 }
 
 `);
+
+//*/

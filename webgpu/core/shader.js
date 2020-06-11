@@ -2,7 +2,7 @@ let BASE_PATH = "./shaders"
 let fs = require("fs");
 let pathmod = require("path");
 
-import * as parser from "./parser.js";
+import {parser} from './parser.js';
 
 export function readShader(path) {
   console.log(pathmod.resolve("./"));
@@ -113,7 +113,7 @@ export function preprocess(buf, path, state=undefined) {
       //console.log(l[0], l);
 
       if (l[0] === "define") {
-        let re = escapeRe(l[1]);
+        let re = escapeRe(l[1]) + "$";
 
         //console.log(re);
         re = new RegExp(re);
@@ -126,7 +126,7 @@ export function preprocess(buf, path, state=undefined) {
       } else if (l[0] === "include") {
         let path2 = l[1].replace(/["'`]/g, "").trim();
         let buf2 = readShader(path2);
-         preprocess(buf2, path2, state);
+        out += preprocess(buf2, path2, state);
       }
     } else {
       out += doDefs(l, defs) + "\n";
@@ -203,9 +203,11 @@ export function loadShader(path) {
   var ParseStream = require('glsl-parser/stream')
 
   buf = preprocess(buf, path);
-  buf = "#version 450\n" + buf;
+  //buf = "#version 450\n" + buf;
 
   window.shaderbuf = buf;
+
+  let ast = parser.parse(buf);
 
   /*
   let st = new ReadableString(buf);

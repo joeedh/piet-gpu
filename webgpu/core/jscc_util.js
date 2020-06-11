@@ -1,7 +1,7 @@
 import '../util/jscc.js';
 import * as util from '../util/util.js';
 
-const debug = 1;
+const debug = 0;
 
 export class Parser {
   constructor(lexer, pdata, hash) {
@@ -139,6 +139,8 @@ export class Parser {
     let this2 = this;
 
     function doerror(p) {
+      console.log(pdata);
+
       if (this2.onerror) {
         this2.onerror(p);
       }
@@ -210,6 +212,7 @@ export class Parser {
             err_la[0].push(labels[act_tab[sstack[0]][i]]);
 
           PCB.errorLabels = err_la;
+          console.log(vstack);
           doerror(PCB);
         }
 
@@ -257,6 +260,8 @@ export class Parser {
 
         let prod = pdata.productions[act].rhs;
         let p = [null];
+        p.lexer = lexer;
+
         for (let i=0; i<prod.length; i++) {
           p.push(vstack[prod.length-i-1]);
         }
@@ -402,6 +407,7 @@ export function getParser(lexer, parsedef, tokenlist, prec, parserName) {
     console.log("Old hash:", parser.hash, "new hash:", hash);
 
     if (parser.hash === hash) {
+      window.parser = parser;
       return parser;
     }
   }
@@ -545,6 +551,7 @@ export function getParser(lexer, parsedef, tokenlist, prec, parserName) {
   parser = new Parser(lexer, ret, hash);
 
   localStorage[storageKey] = JSON.stringify(parser);
+  window.parser = parser;
 
   return parser;
 }
