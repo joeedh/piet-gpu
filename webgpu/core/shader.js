@@ -2,7 +2,7 @@ let BASE_PATH = "./shaders"
 let fs = require("fs");
 let pathmod = require("path");
 
-import {parser} from './parser.js';
+import {parser, controlledVisit, visit} from './parser.js';
 
 export function readShader(path) {
   console.log(pathmod.resolve("./"));
@@ -113,7 +113,9 @@ export function preprocess(buf, path, state=undefined) {
       //console.log(l[0], l);
 
       if (l[0] === "define") {
-        let re = escapeRe(l[1]) + "$";
+        //let b = "[ \n\r;\\-\\+\\*\\.\\(\\)\\{\\}\\<\\>\\=\\!\\&\\|\\%\\]\\[\\~\\^]";
+        //let b = "\\n"
+        let re = "\\b" + escapeRe(l[1]) + "\\b";
 
         //console.log(re);
         re = new RegExp(re);
@@ -151,6 +153,254 @@ export function replaceComments(buf) {
   return out;
 }
 
+export function convertToWGSL(ast) {
+  let out = `import "GLSL.std.450" as std::glsl;\n\n`;
+  let scope = {};
+
+  scope.$indent = 0;
+
+  function copyScope(scope) {
+    return Object.assign({}, scope);
+  }
+
+  function indent(n) {
+    let s = "";
+    for (let i=0; i<n; i++) {
+      s += "  ";
+    }
+
+    return s;
+  }
+
+  function addSemi() {
+    if (!out.trim().endsWith("}") && !out.trim().endsWith(";")) {
+      out += ";";
+    }
+  }
+
+  let handlers = {
+    IntConstant(n, scope, visit) {
+      out += n.value;
+    },
+    FloatConstant(n, scope, visit) {
+      out += n.value;
+    },
+    BoolConstant(n, scope, visit) {
+      out += n.value;
+    },
+    UintConstant(n, scope, visit) {
+      out += n.value;
+    },
+    DoubleConstant(n, scope, visit) {
+      out += n.value;
+    },
+    ID(n, scope, visit) {
+      out += n.value;
+    },
+    TypeSpecifier(n, scope, visit) {
+      if (n.arraytype) {
+        if (n.arraytype.type === "VariableArraySpecifier") {
+          out += `array<${n.name}>`;
+        } else {
+          out += `array<${n.name}, `;
+          visit(n, scope);
+          out += '>';
+        }
+      } else {
+        out += n.name;
+      }
+    },
+
+    BinOp(n, scope, visit) {
+      let add_parens = n.parent && n.parent.type === "BinOp" && n.parent.prec > n.prec;
+      if (add_parens) {
+        out += "(";
+      }
+
+      visit(n[0], scope, true);
+      out += " " + n.op + " ";
+      visit(n[1], scope, true);
+
+      if (add_parens) {
+        out += ")";
+      }
+    },
+    BasicMemberLookup(n, scope, visit) {
+      visit(n[0], scope, true);
+      out += ".";
+      visit(n[1], scope, true);
+    },
+    ArrayLookup(n, scope, visit) {
+      //console.log("$$$", n, "$$$");
+      //out += "$$$" + n + "$$$";
+
+      visit(n[0], scope, true);
+      out += "[";
+      visit(n[1], scope, true);
+      out += "]";
+    },
+    Assign(n, scope, visit) {
+      visit(n[0], scope, true);
+      out += " " + n.op + " ";
+      visit(n[1], scope, true);
+    },
+
+    StructMember(n, scope, visit) {
+      let tab = indent(scope.$indent);
+      out += tab + n.name + " : ";
+      if (n.ntype && typeof n.ntype === "object") {
+        visit(n.ntype, scope, true);
+      } else if (n.ntype && typeof n.ntype === "string") {
+        out += n.ntype;
+      } else {
+        throw new Error("" + n + ": missing type");
+      }
+      out += ";\n";
+
+      visit(n, scope);
+    },
+
+    VarDecl(n, scope, visit) {
+      console.log("$$$", n, "$$$");
+      //out += "$$$" + n + "$$$";
+
+      out += "var ";
+      out += n.name + " ";
+      out += " :";
+
+      if (n.ntype) {
+        out += " ";
+        visit(n.ntype, scope, true);
+      } else {
+        out += "(error)";
+      }
+
+      if (n[0] && convertToWGSL(n[0]).trim().length > 0) {
+        out += " = ";
+        visit(n[0], scope, true);
+      }
+
+      if (n.length > 0) {
+        for (let i=1; i<n.length; i++) {
+          visit(n[i], scope, true);
+        }
+      }
+    },
+    StructDecl(n, scope, visit) {
+      let tab = indent(scope.$indent);
+
+      out += tab + `type ${n.name} = struct {\n`;
+      scope.$indent++;
+
+      visit(n, scope);
+
+      scope.$indent--;
+      out += tab + '}\n';
+    },
+    TypeName(n, scope, visit) {
+      out += n.value;
+    },
+
+    TypeDecl(n, scope, visit) {
+      visit(n, scope);
+      out += " " + n.name;
+
+      scope[n.name] = n;
+    },
+    Function(n, scope, visit) {
+      scope = copyScope(scope);
+
+      let tab = indent(scope.$indent);
+
+      out += tab + `fn ${n.name} (`;
+      let first = true;
+
+      for (let c of n[0]) {
+        if (!first) {
+          out += ", ";
+        }
+
+        visit(c, scope, true);
+
+        first = false;
+      }
+
+      out += ") -> ";
+      visit(n.ntype, scope, true);
+
+      out += " {\n"
+      scope.$indent++;
+
+      for (let i=1; i<n.length; i++) {
+        visit(n[i], scope, true);
+      }
+
+      scope.$indent--;
+      out += tab + "}\n";
+    },
+    StatementList(n, scope, visit) {
+      let tab = indent(scope.$indent);
+      let tab2 = tab;
+
+      if (!n.noScope) {
+        out += tab + "{\n";
+        scope = copyScope(scope);
+
+        scope.$indent++;
+        tab2 = indent(scope.$indent);
+      }
+
+      for (let c of n) {
+        out += tab2;
+        visit(c, scope, true);
+
+        if (!out.trim().endsWith("}")) {
+          out += ";";
+        }
+
+        out += "\n";
+      }
+
+      if (!n.noScope) {
+        out += tab + "}\n";
+      }
+    },
+    If(n, scope, visit) {
+      out += "if (";
+      visit(n[0], scope, true);
+      out += ")\n";
+      visit(n[1], scope, true);
+    },
+    Else(n, scope, visit) {
+      visit(n[0], scope, true);
+      out += " else ";
+      visit(n[1], scope, true);
+    },
+    FuncCall(n, scope, visit) {
+      visit(n[0], scope, true);
+      out += "("
+      let first = true;
+      for (let c of n[1]) {
+        if (!first) {
+          out += ", ";
+        }
+
+        visit(c, scope, true);
+        first = false;
+      }
+      out += ")";
+    },
+    Default(n, scope, visit) {
+      //console.log(n.type);
+      visit(n, scope);
+    }
+  };
+
+  controlledVisit(ast, handlers, scope);
+
+  console.log(out);
+  return out;
+}
 
 export function loadShader(path) {
   let buf = readShader(path);
@@ -203,11 +453,14 @@ export function loadShader(path) {
   var ParseStream = require('glsl-parser/stream')
 
   buf = preprocess(buf, path);
-  //buf = "#version 450\n" + buf;
+  //buf = "#version 450\n" + buf  ;
 
   window.shaderbuf = buf;
 
   let ast = parser.parse(buf);
+
+  buf = convertToWGSL(ast);
+  //window.shaderbuf = buf;
 
   /*
   let st = new ReadableString(buf);
@@ -229,3 +482,4 @@ export function loadShader(path) {
 
   //console.log(buf);
 }
+

@@ -5,6 +5,33 @@ import * as util from "../util/util.js";
 
 let tk = (n, r, f) => new tokdef(n, r, f);
 
+let precedence2 = {
+  "("    : 0,
+  ")"    : 0,
+  "["    : 1,
+  "]"    : 1,
+  "."    : 1,
+  "++"   : 1,
+  "--"   : 1,
+  "*"    : 2,
+  "/"    : 2,
+  "%"    : 2,
+  "+"    : 3,
+  "-"    : 3,
+  ">="   : 4,
+  "<="   : 4,
+  ">"    : 4,
+  "<"    : 4,
+  "!="   : 5,
+  "=="   : 5,
+  "&"    : 6,
+  "^"    : 7,
+  "|"    : 8,
+  "&&"   : 9,
+  "^^"   : 10,
+  "||"   : 11
+};
+
 let count = (str, match) => {
   let c = 0;
   do {
@@ -241,6 +268,7 @@ let precedence = [
   ["left", "COMMA"]
 ]
 
+
 function indent(n, chr="  ") {
   let s = "";
   for (let i=0; i<n; i++) {
@@ -351,8 +379,11 @@ let BinOpHandler = (p) => {
   if (p.length === 2) {
     p[0] = p[1];
   } else {
-    p[0] = new Node("BinOpNode");
+    p[0] = new Node("BinOp");
     p[0].op = p[2];
+
+    p[0].prec = precedence2[p[0].op];
+
     p[0].add(p[1]);
     p[0].add(p[3]);
   }
@@ -466,11 +497,15 @@ let parsedef = [
         p[0] = p[1];
       } else if (p.length === 5) {
         p[0] = new Node("ArrayLookup");
+        p[0].add(p[1]);
         p[0].add(p[3]);
       } else if (p.length === 4) {
         p[0] = new Node("BasicMemberLookup");
-        let n = new Node("ID");
-        n.value = p[3];
+        let n = p[3];
+        if (typeof n === "string") {
+          n = new Node("ID");
+          n.value = p[3];
+        }
 
         p[0].add(p[1]);
         p[0].add(n);
@@ -520,19 +555,20 @@ let parsedef = [
                                                    | function_call_header_with_parameters COMMA assignment_expression`,
     func : (p) => {
       if (p.length === 3) {
-        p[0] = new Node("FuncCall");
-        p[0].add(p[1]);
-        p[0].add(p[2]);
+        p[0] = p[1];
+        p[0][1].add(p[2]);
       } else {
         p[0] = p[1];
-        p[0].add(p[3]);
+        p[0][1].add(p[3]);
       }
     }
   },
   {
     grammar : `function_call_header: function_id LPAREN`,
     func : (p) => {
-      p[0] = p[1];
+      p[0] = new Node("FuncCall");
+      p[0].add(p[1]);
+      p[0].add(new Node("ExprList"));
     }
   },
   {
@@ -916,7 +952,7 @@ let parsedef = [
     grammar : `struct_declaration: type_specifier struct_declarator_list SEMI 
                                  | type_qualifier type_specifier struct_declarator_list SEMI`,
     func : (p) => {
-      p[0] = new Node("StructDecl");
+      p[0] = new Node("StructMemberList");
       if (p.length === 4) {
         p[0].ntype = p[1]
         p[0].add(p[2]);
@@ -924,6 +960,10 @@ let parsedef = [
         p[0].add(p[3]);
         p[0].ntype = p[2];
         p[0].ntype.qualifier = p[1];
+      }
+
+      for (let c of p[0][0]) {
+        c.ntype = p[0].ntype;
       }
     }
   },
@@ -944,8 +984,9 @@ let parsedef = [
     grammar : `struct_declarator: ID
                                 | ID array_specifier`,
     func : (p) => {
-      p[0] = new Node("StructDecl");
+      p[0] = new Node("StructMember");
       p[0].name = p[1];
+
       if (p.length > 2) {
         p[0].arraytype = p[2];
       }
@@ -957,7 +998,8 @@ let parsedef = [
  
  `,
     func : (p) => {
-      p[0] = new Node("StructDef");
+      p[0] = new Node("StructDecl");
+
       if (p.length > 5) {
         p[0].name = p[2];
         p[0].add(p[4]);
@@ -1147,12 +1189,14 @@ let parsedef = [
 `,
     func : (p) => {
       if (p.length === 2) {
+        p[0] = p[1];
+        /*
         p[0] = new Node("ExprList");
 
         let n = new Node("VarDecl")
         n.value = p[1];
 
-        p[0].add(n);
+        p[0].add(n);//*/
       } else if (p.length === 4) {
         let n = new Node("VarDecl")
         n.value = p[3];
@@ -1197,12 +1241,15 @@ let parsedef = [
  `,
     func : (p) => {
       if (p.length === 2) {
-        p[0] = new Node("VarDecl")
-        p[0].ntype = p[1];
-        p[0].name = "(anonymous)";
+        p[0] = p[1];
+
+        //p[0] = new Node("VarDecl")
+        //p[0].ntype = p[1];
+        //p[0].name = "(anonymous)";
       } else {
         p[0] = new Node("VarDecl");
         p[0].name = p[2];
+        p[0].ntype = p[1];
 
         if (p.length > 3 && p[3] !== "=") {
           p[0].arraytype = p[3];
@@ -1868,3 +1915,76 @@ void main() {
 `);
 
 //*/
+
+export function fullVisit(ast, cb) {
+  function visit(n) {
+    cb(n);
+
+    for (let c of n) {
+      visit(c);
+    }
+  }
+
+  visit(ast);
+}
+
+export function visit(ast, handlers) {
+  if (typeof handlers === "function") {
+    return fullVisit(ast);
+  }
+
+
+  function visit(n) {
+    if (typeof n === "string") {
+      let n2 = new Node("ID");
+      n2.value = n;
+      n = n2;
+    }
+
+    let type = n.type;
+    if (type in handlers) {
+      handlers[type](n);
+    } else if ("Default" in handlers) {
+      handlers.Default(n);
+    }
+
+    for (let c of n) {
+      visit(c);
+    }
+  }
+
+  visit(ast);
+}
+
+export function controlledVisit(ast, handlers, state) {
+  function descend(n, state, do_n=false) {
+    if (state === undefined) {
+      throw new Error("state cannot be undefined; use null if intentional");
+    }
+
+    if (do_n) {
+      visit(n, state);
+      return;
+    }
+
+    for (let c of n) {
+      visit(c, state);
+    }
+  }
+
+  function visit(n, state) {
+    if (typeof n === "string") {
+      let n2 = new Node("ID");
+      n2.value = n;
+      n = n2;
+    }
+
+    if (n.type in handlers) {
+      handlers[n.type](n, state, descend);
+    } else if ("Default" in handlers) {
+      handlers.Default(n, state, descend);
+    }
+  }
+
+  visit(ast, state);
+}

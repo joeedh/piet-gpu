@@ -260,6 +260,7 @@ export class Parser {
 
         let prod = pdata.productions[act].rhs;
         let p = [null];
+
         p.lexer = lexer;
 
         for (let i=0; i<prod.length; i++) {
